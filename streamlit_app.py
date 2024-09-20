@@ -1,6 +1,7 @@
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import re 
 
 st.title('Graficación de Archivos')
 pd.options.display.float_format = '{:.0f}'.format
@@ -42,20 +43,61 @@ def update_type_column(df, is_principal=True, is_df3=False, file_id=None):
         })
     return df
 
+
+def add_copy_to_hover(df, is_principal=False):
+    # Asegurar que 'copy_in_hover' se inicializa en todas las filas
+    if is_principal:
+        df['copy_in_hover'] = "no aplica"  # Para archivos principales
+    else:
+        df['copy_in_hover'] = "null"  # Inicializa como 'null' para archivos secundarios
+
+    # Asumir que la columna 'Profit' puede contener datos en varios formatos
+    for i in range(1, len(df)):
+        # Considerar que 'copy' puede estar en diferentes partes del DataFrame
+        cell_values = df.iloc[i].tolist()  # Tomar toda la fila como una lista
+        copy_info = [val for val in cell_values if 'copy' in str(val)]  # Buscar 'copy' en cualquier celda
+
+        if copy_info:
+            # Usar expresiones regulares para extraer el número entre '#' y '/'
+            match = re.search(r'#(\d+)/', copy_info[0])
+            if match:
+                copy_number = match.group(1)  # El número entre '#' y '/'
+                df.at[i - 1, 'copy_in_hover'] = f"Copy: {copy_number}"
+
+    return df
+
+
+
+def add_copy_column(df, is_principal=False):
+    if 'copy_in_hover' not in df.columns:
+        df['copy_in_hover'] = None  # Asegurarse de que la columna exista
+    
+    if is_principal:
+        df['copy_in_hover'] = "no aplica"  # Establecer 'no aplica' para todos los registros del archivo principal
+
+    return df
+
+
+
 # Función para leer y procesar el archivo HTML
 def load_and_process_file(uploaded_file, is_principal=True, is_df3=False):
     tabs = pd.read_html(uploaded_file)
     df_combined = tabs[0].iloc[2:]
     df_combined.columns = df_combined.iloc[0]
-
     split_index = df_combined[df_combined.iloc[:, -1] == 'Open Trades:'].index[0]
 
     df1 = df_combined.iloc[:split_index + 1].reset_index(drop=True)
     if is_principal:
-        df1 = df1.iloc[6:-10].reset_index(drop=True)  # Filtrado para df1 si es archivo principal
+        df1 = df1.iloc[1:-1].reset_index(drop=True)  # Filtrado para df1 si es archivo principal
 
     df2 = df_combined.iloc[split_index + 0:].reset_index(drop=True)
     df2 = df2[~df2.iloc[:, 0].str.contains("Closed P/L:", na=False)].reset_index(drop=True)
+    
+    # Aplicamos la detección del copy solo si no es el archivo principal
+    if not is_principal:
+        df2 = add_copy_to_hover(df2)  # Solo aplicamos esta función en los archivos secundarios
+
+    
     if is_principal:
         df2 = df2.iloc[0:-10].reset_index(drop=True)  # Filtrado para df2 si es archivo principal
 
@@ -64,21 +106,27 @@ def load_and_process_file(uploaded_file, is_principal=True, is_df3=False):
     df1['Close Time'] = pd.to_datetime(df1['Close Time'].str.replace('.', '-'), errors='coerce')
     df2['Open Time'] = pd.to_datetime(df2['Open Time'].str.replace('.', '-'), errors='coerce')
 
-    # Procesar los DataFrames
+    # Procesar los DataFrames, agregando la columna 'Ticket'
     df1 = process_dataframe(df1, is_principal=is_principal, is_df3=is_df3)
     df2 = process_dataframe(df2, is_principal=is_principal, is_df3=is_df3)
 
-    df1_open = df1[['Open Time', 'Open Price', 'Profit', 'T / P', 'Size', 'Source']].copy()
+    df1_open = df1[['Open Time', 'Open Price', 'Profit', 'T / P', 'Size', 'Ticket', 'Source']].copy()
     df1_open['Type'] = 'Open df1' if not is_df3 else 'Open df3'
-    df1_open.columns = ['Time', 'Price', 'Profit', 'T/P', 'Size', 'Source', 'Type']
+    df1_open.columns = ['Time', 'Price', 'Profit', 'T/P', 'Size', 'Ticket', 'Source', 'Type']
 
-    df1_close = df1[['Close Time', 'Close Price', 'Profit', 'T / P', 'Size', 'Source']].copy()
+    df1_close = df1[['Close Time', 'Close Price', 'Profit', 'T / P', 'Size', 'Ticket', 'Source']].copy()
     df1_close['Type'] = 'Close df1' if not is_df3 else 'Close df3'
-    df1_close.columns = ['Time', 'Price', 'Profit', 'T/P', 'Size', 'Source', 'Type']
+    df1_close.columns = ['Time', 'Price', 'Profit', 'T/P', 'Size', 'Ticket', 'Source', 'Type']
 
-    df2_open = df2[['Open Time', 'Open Price', 'Profit', 'T / P', 'Size', 'Source']].copy()
-    df2_open['Type'] = 'Open df2' if not is_df3 else 'Open df3'
-    df2_open.columns = ['Time', 'Price', 'Profit', 'T/P', 'Size', 'Source', 'Type']
+    if not is_principal:
+        df2_open = df2[['Open Time', 'Open Price', 'Profit', 'T / P', 'Size', 'Ticket', 'Source']].copy()
+        df2_open['Type'] = 'Open df2' if not is_df3 else 'Open df3'
+        df2_open.columns = ['Time', 'Price', 'Profit', 'T/P', 'Size', 'Ticket', 'Source', 'Type']
+
+    else:
+        df2_open = df2[['Open Time', 'Open Price', 'Profit', 'T / P', 'Size', 'Ticket', 'Source']].copy()
+        df2_open['Type'] = 'Open df2' if not is_df3 else 'Open df3'
+        df2_open.columns = ['Time', 'Price', 'Profit', 'T/P', 'Size', 'Ticket', 'Source', 'Type']
 
     df_combined_final = pd.concat([df1_open, df1_close, df2_open], ignore_index=True)
     df_combined_final['Price'] = pd.to_numeric(df_combined_final['Price'], errors='coerce')
@@ -87,9 +135,12 @@ def load_and_process_file(uploaded_file, is_principal=True, is_df3=False):
     df_combined_final['Month'] = df_combined_final['Time'].dt.month.astype('Int64')
     df_combined_final['Year'] = df_combined_final['Time'].dt.year.astype('Int64')
 
-    df_combined_final = df_combined_final.sort_values(by='Time')
+    #df_combined_final = df_combined_final.sort_values(by='Time')
 
     return df_combined_final
+
+
+
 
 # Cargar archivo principal
 uploaded_file_principal = st.file_uploader("Cargar archivo principal HTML", type="htm")
@@ -118,29 +169,51 @@ if df_combined_final_principal is not None:
     df_combined_final_principal = update_type_column(df_combined_final_principal, is_principal=True)
 
 
-# Definir hover_data
 hover_data = {
     'Profit': True,
     'T/P': True,
     'Source': True,
-    'Size': True  
+    'Size': True,
+    'Ticket': True,  # Siempre mostrar el ticket
+    'copy_in_hover': True
 }
 
 
 
+
+
+
+if df_combined_final_principal is not None:
+    df_combined_final_principal = add_copy_column(df_combined_final_principal, is_principal=True)
+    df_combined_final_principal = update_type_column(df_combined_final_principal, is_principal=True)
+
+
 if df_combined_final_df3 is not None:
-    file_id = uploaded_file_adicional.name.split('.')[0]  # Usar el nombre del archivo cargado como Id
+    df_combined_final_df3 = add_copy_to_hover(df_combined_final_df3)
+    file_id = uploaded_file_adicional.name.split('.')[0]
     df_combined_final_df3 = update_type_column(df_combined_final_df3, is_principal=False, is_df3=True, file_id=file_id)
+
 
 # Combinar y filtrar los datos si ambos archivos fueron cargados
 if df_combined_final_principal is not None and df_combined_final_df3 is not None:
+    # Asegurar que ambos DataFrames tienen la columna 'copy_in_hover'
+    df_combined_final_principal = add_copy_column(df_combined_final_principal)
+    df_combined_final_df3 = add_copy_column(df_combined_final_df3)
+    
+    # Combinar ambos DataFrames
     combined_df = pd.concat([df_combined_final_principal, df_combined_final_df3], ignore_index=True)
+
+    # Inicializamos filtered_df con el DataFrame combinado por defecto
+    filtered_df = combined_df
+
     
     # Inicializamos filtered_df con el DataFrame combinado por defecto
     filtered_df = combined_df
+
+
     
-    # Selección de filtros
-    filtro = st.selectbox('Selecciona el tipo de filtro', ['Día', 'Mes', 'Año', 'Rango de Días', 'Rango de Meses', 'Rango de Años'])
+   # Selección de filtros
+    filtro = st.selectbox('Selecciona el tipo de filtro', ['Día', 'Mes', 'Año', 'Rango de Días', 'Rango de Meses', 'Rango de Años', 'Ticket/Copy'])
 
     if filtro == 'Día':
         dia = st.number_input('Día:', min_value=1, max_value=31, value=1)
@@ -166,12 +239,38 @@ if df_combined_final_principal is not None and df_combined_final_df3 is not None
         año_inicio = st.number_input('Año Inicio:', min_value=2000, max_value=2100, value=2022)
         año_fin = st.number_input('Año Fin:', min_value=2000, max_value=2100, value=2023)
         filtered_df = combined_df[((combined_df['Year'] > año_inicio) & (combined_df['Year'] < año_fin)) |
-                                  ((combined_df['Year'] == año_inicio) & (combined_df['Month'] >= mes_inicio)) |
-                                  ((combined_df['Year'] == año_fin) & (combined_df['Month'] <= mes_fin))]
+                                ((combined_df['Year'] == año_inicio) & (combined_df['Month'] >= mes_inicio)) |
+                                ((combined_df['Year'] == año_fin) & (combined_df['Month'] <= mes_fin))]
     elif filtro == 'Rango de Años':
         año_inicio = st.number_input('Año Inicio:', min_value=2000, max_value=2100, value=2022)
         año_fin = st.number_input('Año Fin:', min_value=2000, max_value=2100, value=2023)
         filtered_df = combined_df[(combined_df['Year'] >= año_inicio) & (combined_df['Year'] <= año_fin)]
+
+    elif filtro == 'Ticket/Copy':
+        ticket_filtro = st.text_input('Ingrese el número de ticket o copy para filtrar').strip()
+
+        if ticket_filtro:
+            # Crear DataFrame vacío para acumular resultados
+            filtered_df = pd.DataFrame()
+
+            # Convertir todos los tickets a string y remover espacios extra para asegurar coincidencia
+            combined_df['Ticket'] = combined_df['Ticket'].astype(str).str.strip()
+
+            # Filtrar por 'Ticket' en los archivos principales
+            principal_filter = combined_df[
+                (combined_df['Source'] == 'Principal') & (combined_df['Ticket'] == ticket_filtro)
+            ]
+
+            # Filtrar por 'copy' en los archivos secundarios
+            secondary_filter = combined_df[
+                (combined_df['Source'] != 'Principal') & (combined_df['copy_in_hover'].str.contains(ticket_filtro, na=False))
+            ]
+
+            # Concatenar los resultados de ambos filtros
+            filtered_df = pd.concat([principal_filter, secondary_filter], ignore_index=True)
+
+
+
 
     # Reemplazar NaN en 'Size' con 0
     if 'Size' in filtered_df.columns:
@@ -221,4 +320,4 @@ if st.button('Mostrar/Ocultar Tablas de Datos'):
         columnas_df3 = [col for col in df_combined_final_df3.columns if col not in columnas_a_ocultar]
         st.dataframe(df_combined_final_df3[columnas_df3])  # Mostrar solo las columnas filtradas
 else:
-    st.write("Por favor, carga un archivo HTML para comenzar.")
+    st.write("Por favor, carga un archivo HTML para comenzar.")    
